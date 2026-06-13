@@ -1,5 +1,5 @@
 {
-  "name": "whisperr/whisperr-php",
+  "name": "whisperr/php",
   "description": "Whisperr server-side SDK for PHP (with Laravel support) — reliable churn-signal event tracking.",
   "type": "library",
   "keywords": ["whisperr", "analytics", "churn", "events", "tracking", "retention", "laravel"],

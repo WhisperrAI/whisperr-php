@@ -6,7 +6,7 @@ the highest-signal churn events live (payment failures, cancellations, trial
 expiry, usage drops), so this is where Whisperr gets its most valuable signal.
 
 ```bash
-composer require whisperr/whisperr-php
+composer require whisperr/php
 ```
 
 ## Laravel
