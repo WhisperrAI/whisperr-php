@@ -1,0 +1,36 @@
+{
+  "name": "whisperr/whisperr-php",
+  "description": "Whisperr server-side SDK for PHP (with Laravel support) — reliable churn-signal event tracking.",
+  "type": "library",
+  "keywords": ["whisperr", "analytics", "churn", "events", "tracking", "retention", "laravel"],
+  "homepage": "https://whisperr.net",
+  "license": "MIT",
+  "authors": [{ "name": "Whisperr" }],
+  "require": {
+    "php": ">=8.1",
+    "ext-curl": "*",
+    "ext-json": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "illuminate/support": "^10.0 || ^11.0"
+  },
+  "suggest": {
+    "illuminate/support": "Required only when using the Laravel service provider and facade."
+  },
+  "autoload": {
+    "psr-4": { "Whisperr\\": "src/" }
+  },
+  "autoload-dev": {
+    "psr-4": { "Whisperr\\Tests\\": "tests/" }
+  },
+  "extra": {
+    "laravel": {
+      "providers": ["Whisperr\\Laravel\\WhisperrServiceProvider"],
+      "aliases": { "Whisperr": "Whisperr\\Laravel\\Facades\\Whisperr" }
+    }
+  },
+  "config": { "sort-packages": true },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
