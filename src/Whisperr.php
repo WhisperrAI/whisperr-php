@@ -107,17 +107,34 @@ class Whisperr
         if ($this->disabled || empty($this->queue)) {
             return;
         }
+        // Take ownership of the buffer and deliver it batch by batch, in order.
+        // Events are removed only once delivered (or intentionally dropped). On
+        // auth failure or exhausted retries we put the failed batch back in
+        // front of whatever's left and stop, so a later flush() retries the
+        // same events instead of losing them.
         $ops = $this->queue;
         $this->queue = [];
 
-        $tracks = array_values(array_filter($ops, static fn ($o) => $o['kind'] === 'track'));
-        $idents = array_values(array_filter($ops, static fn ($o) => $o['kind'] === 'identify'));
+        while ($ops) {
+            if ($ops[0]['kind'] === 'identify') {
+                $batch = array_splice($ops, 0, 1);
+                $result = $this->deliver(fn () => $this->transport->sendIdentify($batch[0]), 1);
+            } else {
+                // A leading run of track ops, up to the batch cap.
+                $n = 0;
+                while ($n < count($ops) && $n < $this->maxBatch && $ops[$n]['kind'] === 'track') {
+                    $n++;
+                }
+                $batch = array_splice($ops, 0, $n);
+                $result = $this->deliver(fn () => $this->transport->sendBatch($batch), count($batch));
+            }
 
-        foreach (array_chunk($tracks, $this->maxBatch) as $chunk) {
-            $this->deliver(fn () => $this->transport->sendBatch($chunk), count($chunk));
-        }
-        foreach ($idents as $op) {
-            $this->deliver(fn () => $this->transport->sendIdentify($op), 1);
+            if ($result === 'ok' || $result === 'drop') {
+                continue;
+            }
+            // auth / retry_exhausted: retain the failed batch + the remainder.
+            $this->queue = array_merge($batch, $ops);
+            return;
         }
     }
 
@@ -130,27 +147,33 @@ class Whisperr
         }
     }
 
-    /** @param callable():string $send */
-    private function deliver(callable $send, int $count): void
+    /**
+     * Send one batch, retrying transient failures with backoff. Returns the
+     * terminal outcome so flush() can decide whether to drop or retain the batch.
+     *
+     * @param callable():string $send
+     * @return 'ok'|'drop'|'auth'|'retry_exhausted'
+     */
+    private function deliver(callable $send, int $count): string
     {
         $retries = 0;
         while (true) {
             $result = $send();
             if ($result === 'ok') {
-                return;
+                return 'ok';
             }
             if ($result === 'drop') {
                 $this->emit('dropped', "dropped $count event(s) — rejected by server");
-                return;
+                return 'drop';
             }
             if ($result === 'auth') {
                 $this->emit('auth', 'delivery paused — API key rejected', 401);
-                return;
+                return 'auth';
             }
             $retries++;
             if ($retries > $this->maxRetries) {
-                $this->emit('retry_exhausted', 'delivery failed after retries');
-                return;
+                $this->emit('retry_exhausted', 'delivery failed after retries; will retry on next flush');
+                return 'retry_exhausted';
             }
             usleep((int) ($this->backoff($retries) * 1_000_000));
         }

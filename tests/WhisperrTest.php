@@ -107,6 +107,23 @@ final class WhisperrTest extends TestCase
         $this->assertcontainsError('retry_exhausted', $errors);
     }
 
+    public function testFailedEventsAreRetainedAndRetried(): void
+    {
+        // A delivery that fails on auth must keep the events buffered so a later
+        // flush retries the SAME events instead of silently dropping them.
+        $t = new FakeTransport('auth');
+        $w = $this->client($t);
+        $w->track('user_1', 'feature_used');
+        $w->flush(); // auth → event retained
+        $attemptsBefore = count($t->batches);
+
+        $t->setResult('ok');
+        $w->flush(); // retries the retained event, now succeeds
+        $this->assertCount($attemptsBefore + 1, $t->batches);
+        $last = $t->batches[count($t->batches) - 1];
+        $this->assertSame('feature_used', $last[0]['event_type']);
+    }
+
     public function testDisabledIsNoop(): void
     {
         $t = new FakeTransport();

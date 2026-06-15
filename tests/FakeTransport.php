@@ -18,6 +18,12 @@ final class FakeTransport implements TransportInterface
     {
     }
 
+    /** Change the result returned by subsequent sends (e.g. simulate recovery). */
+    public function setResult(string $result): void
+    {
+        $this->result = $result;
+    }
+
     public function sendBatch(array $events): string
     {
         $this->batches[] = $events;

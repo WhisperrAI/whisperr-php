@@ -63,8 +63,10 @@ and frontend + backend events land on one timeline automatically.
 - **Request-friendly.** Events buffer in memory and deliver in a batch on
   `flush()` — automatically after the Laravel response (or on shutdown). Retries
   are bounded so request teardown never hangs.
-- **Reliable.** Batching, retry with backoff, 429/5xx retry, 401/403 stop,
-  malformed-4xx drop, per-event idempotency key.
+- **Reliable in-process.** Batching, retry with backoff (429/5xx), malformed-4xx
+  drop, per-event idempotency key. On `401/403` or exhausted retries, the failed
+  batch stays buffered and is retried on the next `flush()` rather than being
+  dropped. The buffer lives for the request only — it is not crash-durable.
 - **No Composer dependencies.** Uses ext-curl + ext-json only.
 
 ## Options (plain-PHP constructor)
