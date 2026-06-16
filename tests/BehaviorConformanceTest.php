@@ -105,7 +105,6 @@ final class BehaviorConformanceTest extends TestCase
     private function pendingCount(Whisperr $client): int
     {
         $prop = new \ReflectionProperty($client, 'queue');
-        $prop->setAccessible(true);
         return count($prop->getValue($client));
     }
 }

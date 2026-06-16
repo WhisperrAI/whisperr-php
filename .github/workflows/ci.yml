@@ -16,6 +16,10 @@ jobs:
         php-version: ["8.1", "8.2", "8.3"]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: WhisperrAI/whisperr-spec
+          path: whisperr-spec
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php-version }}
@@ -23,3 +27,5 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - run: vendor/bin/phpunit
+        env:
+          WHISPERR_SPEC_PATH: ${{ github.workspace }}/whisperr-spec/conformance/wire.json

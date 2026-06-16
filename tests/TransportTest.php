@@ -49,6 +49,20 @@ final class TransportTest extends TestCase
         );
     }
 
+    public function testIdentifyAcceptsWireShapedExplicitChannels(): void
+    {
+        $t = $this->transport();
+        $t->sendIdentify([
+            'external_user_id' => 'u1',
+            'channels' => [['channel' => 'sms', 'address' => '+15551234567', 'verified' => true]],
+        ]);
+
+        $this->assertSame(
+            [['channel' => 'sms', 'address' => '+15551234567', 'opted_in' => true, 'verified' => true]],
+            $t->captured['body']['channels'],
+        );
+    }
+
     public function testEmptyBatchShortCircuits(): void
     {
         $t = $this->transport();

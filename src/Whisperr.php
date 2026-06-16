@@ -83,11 +83,14 @@ class Whisperr
      */
     public function track(string $externalUserId, string $eventType, array $properties = [], array $context = []): void
     {
+        $eventType = trim($eventType);
         if ($this->disabled || $externalUserId === '' || $eventType === '') {
             return;
         }
-        if ($this->debug && !preg_match(self::SNAKE_CASE, $eventType)) {
-            $this->warn("event_type \"$eventType\" is not snake_case — the server will reject it");
+        if (!preg_match(self::SNAKE_CASE, $eventType)) {
+            $this->emit('dropped', "invalid event_type \"$eventType\" — expected snake_case");
+            $this->warn("invalid event_type \"$eventType\" — event was not queued");
+            return;
         }
         $this->queue[] = [
             'kind' => 'track',

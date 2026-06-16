@@ -61,7 +61,7 @@ class Transport implements TransportInterface
         if (!empty($op['channels'])) {
             $body['channels'] = array_map(static function (array $c): array {
                 $out = [
-                    'channel' => $c['type'],
+                    'channel' => $c['type'] ?? $c['channel'],
                     'address' => $c['address'],
                     'opted_in' => $c['opted_in'] ?? true,
                 ];

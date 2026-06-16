@@ -68,6 +68,22 @@ final class WhisperrTest extends TestCase
         $this->assertSame([], $t->batches);
     }
 
+    public function testInvalidEventTypeIsDroppedBeforeItCanPoisonBatch(): void
+    {
+        $t = new FakeTransport();
+        $errors = [];
+        $w = $this->client($t, ['on_error' => function (WhisperrError $e) use (&$errors) {
+            $errors[] = $e;
+        }]);
+        $w->track('user_1', 'User Signed Up');
+        $w->track('user_1', 'checkout_completed');
+        $w->flush();
+
+        $this->assertContainsError('dropped', $errors);
+        $events = array_merge(...$t->batches);
+        $this->assertSame(['checkout_completed'], array_column($events, 'event_type'));
+    }
+
     public function testAuthFailureEmitsAndStops(): void
     {
         $t = new FakeTransport('auth');
