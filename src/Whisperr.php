@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Whisperr;
 
 use Whisperr\Contracts\TransportInterface;
+use Whisperr\Contracts\PublisherTransportInterface;
+use Whisperr\Contracts\MessageHistoryTransportInterface;
+use Whisperr\Contracts\IdentityTransportInterface;
 
 /**
  * Whisperr server-side SDK for PHP.
@@ -45,8 +48,8 @@ class Whisperr
             throw new \InvalidArgumentException('api_key is required');
         }
         $baseUrl = rtrim((string) ($options['base_url'] ?? self::DEFAULT_BASE), '/');
-        $this->flushAt = (int) ($options['flush_at'] ?? 100);
-        $this->maxBatch = min((int) ($options['max_batch_size'] ?? 500), 500);
+        $this->flushAt = max(1, (int) ($options['flush_at'] ?? 100));
+        $this->maxBatch = max(1, min((int) ($options['max_batch_size'] ?? 500), 500));
         $this->maxRetries = (int) ($options['max_retries'] ?? 3);
         $this->debug = (bool) ($options['debug'] ?? false);
         $this->onError = $options['on_error'] ?? null;
@@ -78,6 +81,31 @@ class Whisperr
     }
 
     /**
+     * Synchronously commit an identity/contact update; useful when the caller
+     * must confirm channel registration or exact-token revocation before return.
+     * @param array<string,mixed> $params
+     * @return array<string,mixed>
+     */
+    public function identifyNow(string $externalUserId, array $params = []): array
+    {
+        if (trim($externalUserId) === '' || trim($externalUserId) !== $externalUserId) {
+            throw new \InvalidArgumentException('externalUserId must be a nonempty, unpadded stable user ID');
+        }
+        if ($this->disabled) {
+            throw new RequestException('disabled', null);
+        }
+        if (!$this->transport instanceof IdentityTransportInterface) {
+            throw new \LogicException('This transport does not support synchronous identity updates');
+        }
+        return $this->transport->identifyNow([
+            'external_user_id' => $externalUserId,
+            'traits' => $params['traits'] ?? null,
+            'preferred_channel' => $params['preferred_channel'] ?? null,
+            'channels' => $params['channels'] ?? $this->buildChannels($params),
+        ]);
+    }
+
+    /**
      * @param array<string,mixed> $properties
      * @param array<string,mixed> $context
      */
@@ -102,6 +130,88 @@ class Whisperr
             'message_id' => $this->uuid(),
         ];
         $this->maybeFlush();
+    }
+
+    /**
+     * Publish one persisted outbox event with one HTTP attempt. The caller owns
+     * retry scheduling and must reuse the same ID, timestamp and payload.
+     * Requires a server key bound to a Whisperr source producer.
+     *
+     * @param array<string,mixed> $properties
+     * @param array<string,mixed> $context
+     */
+    public function publish(
+        string $externalUserId,
+        string $eventType,
+        array $properties,
+        string $messageId,
+        string $occurredAt,
+        array $context = []
+    ): PublishResult {
+        if (trim($externalUserId) === '' || $externalUserId !== trim($externalUserId)) {
+            throw new \InvalidArgumentException('externalUserId must be a nonempty, unpadded stable user ID');
+        }
+        if (!preg_match(self::SNAKE_CASE, $eventType)) {
+            throw new \InvalidArgumentException('eventType must be snake_case');
+        }
+        if ($messageId === '' || trim($messageId) !== $messageId || strlen($messageId) > 200) {
+            throw new \InvalidArgumentException('messageId must be a nonempty, unpadded string of at most 200 bytes');
+        }
+        // Do not normalize or replace an original occurrence time on replay.
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/D', $occurredAt)) {
+            throw new \InvalidArgumentException('occurredAt must be an RFC3339 timestamp with a timezone');
+        }
+        $parts = date_parse($occurredAt);
+        if ($parts['error_count'] || $parts['warning_count']) {
+            throw new \InvalidArgumentException('occurredAt must be a valid date and time');
+        }
+        if ($this->disabled) {
+            return new PublishResult(false, false, null, null, null, false, 'disabled');
+        }
+        if (!$this->transport instanceof PublisherTransportInterface) {
+            throw new \LogicException('This transport does not support acknowledged publishing');
+        }
+        return $this->transport->publishEvent([
+            'external_user_id' => $externalUserId,
+            'event_type' => $eventType,
+            'properties' => $properties,
+            'context' => $context,
+            'occurred_at' => $occurredAt,
+            'message_id' => $messageId,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    public function messageHistory(string $externalUserId, int $limit = 50, ?string $cursor = null): array
+    {
+        $this->assertHistoryAvailable($externalUserId);
+        if ($limit < 1 || $limit > 100 || ($cursor !== null && ($cursor === '' || strlen($cursor) > 4096))) {
+            throw new \InvalidArgumentException('Invalid message history limit or cursor');
+        }
+        return $this->transport->messageHistory($externalUserId, $limit, $cursor);
+    }
+
+    /** @return array<string,mixed> */
+    public function message(string $externalUserId, string $messageId): array
+    {
+        $this->assertHistoryAvailable($externalUserId);
+        if (trim($messageId) === '') {
+            throw new \InvalidArgumentException('messageId is required');
+        }
+        return $this->transport->message($externalUserId, $messageId);
+    }
+
+    private function assertHistoryAvailable(string $externalUserId): void
+    {
+        if (trim($externalUserId) === '') {
+            throw new \InvalidArgumentException('externalUserId is required');
+        }
+        if ($this->disabled) {
+            throw new RequestException('disabled', null);
+        }
+        if (!$this->transport instanceof MessageHistoryTransportInterface) {
+            throw new \LogicException('This transport does not support message history');
+        }
     }
 
     /** Deliver everything currently buffered. Safe to call repeatedly. */
