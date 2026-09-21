@@ -6,8 +6,6 @@ namespace Whisperr;
 
 use Whisperr\Contracts\TransportInterface;
 use Whisperr\Contracts\PublisherTransportInterface;
-use Whisperr\Contracts\MessageHistoryTransportInterface;
-use Whisperr\Contracts\IdentityTransportInterface;
 
 /**
  * Whisperr server-side SDK for PHP.
@@ -78,31 +76,6 @@ class Whisperr
             'channels' => $params['channels'] ?? $this->buildChannels($params),
         ];
         $this->maybeFlush();
-    }
-
-    /**
-     * Synchronously commit an identity/contact update; useful when the caller
-     * must confirm channel registration or exact-token revocation before return.
-     * @param array<string,mixed> $params
-     * @return array<string,mixed>
-     */
-    public function identifyNow(string $externalUserId, array $params = []): array
-    {
-        if (trim($externalUserId) === '' || trim($externalUserId) !== $externalUserId) {
-            throw new \InvalidArgumentException('externalUserId must be a nonempty, unpadded stable user ID');
-        }
-        if ($this->disabled) {
-            throw new RequestException('disabled', null);
-        }
-        if (!$this->transport instanceof IdentityTransportInterface) {
-            throw new \LogicException('This transport does not support synchronous identity updates');
-        }
-        return $this->transport->identifyNow([
-            'external_user_id' => $externalUserId,
-            'traits' => $params['traits'] ?? null,
-            'preferred_channel' => $params['preferred_channel'] ?? null,
-            'channels' => $params['channels'] ?? $this->buildChannels($params),
-        ]);
     }
 
     /**
@@ -179,39 +152,6 @@ class Whisperr
             'occurred_at' => $occurredAt,
             'message_id' => $messageId,
         ]);
-    }
-
-    /** @return array<string,mixed> */
-    public function messageHistory(string $externalUserId, int $limit = 50, ?string $cursor = null): array
-    {
-        $this->assertHistoryAvailable($externalUserId);
-        if ($limit < 1 || $limit > 100 || ($cursor !== null && ($cursor === '' || strlen($cursor) > 4096))) {
-            throw new \InvalidArgumentException('Invalid message history limit or cursor');
-        }
-        return $this->transport->messageHistory($externalUserId, $limit, $cursor);
-    }
-
-    /** @return array<string,mixed> */
-    public function message(string $externalUserId, string $messageId): array
-    {
-        $this->assertHistoryAvailable($externalUserId);
-        if (trim($messageId) === '') {
-            throw new \InvalidArgumentException('messageId is required');
-        }
-        return $this->transport->message($externalUserId, $messageId);
-    }
-
-    private function assertHistoryAvailable(string $externalUserId): void
-    {
-        if (trim($externalUserId) === '') {
-            throw new \InvalidArgumentException('externalUserId is required');
-        }
-        if ($this->disabled) {
-            throw new RequestException('disabled', null);
-        }
-        if (!$this->transport instanceof MessageHistoryTransportInterface) {
-            throw new \LogicException('This transport does not support message history');
-        }
     }
 
     /** Deliver everything currently buffered. Safe to call repeatedly. */

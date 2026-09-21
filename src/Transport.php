@@ -6,8 +6,6 @@ namespace Whisperr;
 
 use Whisperr\Contracts\TransportInterface;
 use Whisperr\Contracts\PublisherTransportInterface;
-use Whisperr\Contracts\MessageHistoryTransportInterface;
-use Whisperr\Contracts\IdentityTransportInterface;
 
 /**
  * HTTP transport for the Whisperr ingestion API (cURL, no Composer deps).
@@ -18,7 +16,7 @@ use Whisperr\Contracts\IdentityTransportInterface;
  *   "auth"  — key rejected (401/403); stop and surface
  *   "drop"  — other 4xx (malformed); discard to avoid an infinite retry loop
  */
-class Transport implements TransportInterface, PublisherTransportInterface, MessageHistoryTransportInterface, IdentityTransportInterface
+class Transport implements TransportInterface, PublisherTransportInterface
 {
     /** @param callable(string):void $warn */
     public function __construct(
@@ -71,17 +69,6 @@ class Transport implements TransportInterface, PublisherTransportInterface, Mess
         return $body;
     }
 
-    public function identifyNow(array $op): array
-    {
-        $body = $this->decodedResponse($this->request('POST', '/v1/identify', $this->identifyBody($op)));
-        $user = $body['user'] ?? null;
-        if (!is_array($user) || !is_string($user['id'] ?? null) || $user['id'] === ''
-            || ($user['external_id'] ?? null) !== $op['external_user_id'] || !is_bool($user['created'] ?? null)) {
-            throw new RequestException('invalid_response', 502);
-        }
-        return $body;
-    }
-
     /** @param array<string,mixed> $event */
     private function eventBody(array $event): array
     {
@@ -120,65 +107,6 @@ class Transport implements TransportInterface, PublisherTransportInterface, Mess
         return new PublishResult($accepted, !$accepted && !$blocked, $status,
             $receipt['delivery_id'], $receipt['disposition'], $receipt['duplicate'],
             $accepted ? null : ($blocked ? 'delivery_' . $receipt['disposition'] : 'invalid_receipt'));
-    }
-
-    public function messageHistory(string $externalUserId, int $limit = 50, ?string $cursor = null): array
-    {
-        $query = ['limit' => $limit];
-        if ($cursor !== null) {
-            $query['cursor'] = $cursor;
-        }
-        $body = $this->read('/v1/users/' . str_replace('.', '%2E', rawurlencode($externalUserId)) . '/messages?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986));
-        if (!is_array($body['messages'] ?? null) || !array_key_exists('next_cursor', $body)
-            || ($body['next_cursor'] !== null && !is_string($body['next_cursor']))) {
-            throw new RequestException('invalid_response', 502);
-        }
-        foreach ($body['messages'] as $message) {
-            $this->validateMessage($message);
-        }
-        return $body;
-    }
-
-    public function message(string $externalUserId, string $messageId): array
-    {
-        $body = $this->read('/v1/users/' . str_replace('.', '%2E', rawurlencode($externalUserId)) . '/messages/' . str_replace('.', '%2E', rawurlencode($messageId)));
-        $this->validateMessage($body['message'] ?? null);
-        return $body;
-    }
-
-    /** @param mixed $message */
-    private function validateMessage($message): void
-    {
-        if (!is_array($message)) {
-            throw new RequestException('invalid_response', 502);
-        }
-        foreach (['id', 'title', 'body', 'created_at'] as $field) {
-            if (!is_string($message[$field] ?? null)) {
-                throw new RequestException('invalid_response', 502);
-            }
-        }
-        if (!array_key_exists('action', $message) || ($message['action'] !== null && !is_array($message['action']))) {
-            throw new RequestException('invalid_response', 502);
-        }
-    }
-
-    /** @return array<string,mixed> */
-    private function read(string $path): array
-    {
-        return $this->decodedResponse($this->request('GET', $path));
-    }
-
-    private function decodedResponse(array $response): array
-    {
-        $status = $response['status'];
-        $body = json_decode($response['body'], true);
-        if ($status === null || $status < 200 || $status >= 300) {
-            throw new RequestException($this->errorCode($body, 'request_failed'), $status);
-        }
-        if (!is_array($body)) {
-            throw new RequestException('invalid_response', 502);
-        }
-        return $body;
     }
 
     /** @param mixed $body */
