@@ -87,3 +87,65 @@ and frontend + backend events land on one timeline automatically.
 
 Whisperr — predict churn, automate interventions, recover revenue.
 [whisperr.net](https://whisperr.net)
+
+## Runtime support
+
+PHP 8.0 or later is supported. The runtime package uses only `ext-curl` and
+`ext-json`; Laravel is optional. CI tests PHP 8.0 with Illuminate 8.83 and
+PHPUnit 9.6, and PHP 8.1–8.3 with compatible Illuminate 10/11 versions. This
+includes service-provider registration and termination behavior.
+
+## Durable backend outcomes
+
+Use `publish()` from a durable outbox worker when losing a committed outcome is
+unacceptable. Unlike `track()`, it is synchronous, makes **one HTTP attempt**,
+and returns an authoritative ingestion receipt. It requires a server ingestion
+key **bound to the approved Whisperr source producer**. A legacy key's generic
+2xx response is not accepted as proof of durable source ingestion.
+
+Insert an outbox row in the **same database transaction** as the business change.
+Persist its unique event ID, original RFC3339 occurrence timestamp, stable user
+ID and immutable event payload. Do not send the HTTP request inside that
+transaction. A scheduled worker claims committed rows and uses:
+
+```php
+$result = $whisperr->publish(
+    (string) $row->external_user_id,
+    $row->event_type,
+    $row->properties,
+    $row->message_id,
+    $row->occurred_at, // original RFC3339 timestamp, never the retry time
+);
+
+if ($result->acknowledged()) {
+    // Atomically acknowledge this claimed outbox row; keep the receipt for audit.
+    $outbox->acknowledge($row->id, $result->deliveryId());
+} elseif ($result->retryable()) {
+    $outbox->scheduleRetry($row->id); // bounded exponential backoff + jitter
+} else {
+    $outbox->flagForReview($row->id, $result->errorCode());
+}
+```
+
+`$outbox` above represents your application's persistent storage, not an SDK
+class. Protect claims against concurrent workers, retain failures for inspection,
+and retry after a worker crash or ambiguous timeout using the **same message ID,
+time, user and payload**. IDs must be nonempty and at most 200 bytes. The ingestion
+API currently rejects occurrences older than 30 days or over five minutes in the
+future; retain these failures for review rather than rewriting their timestamps.
+
+`PublishResult` exposes `acknowledged()`, `retryable()`, `status()`, `deliveryId()`,
+`disposition()`, `duplicate()` and `errorCode()`. A `retrying` receipt means Whisperr
+owns durable processing; `completed` includes an already processed duplicate.
+Neither claims that a message was sent or a business conversion occurred.
+`quarantined`, `dead_lettered` and `suppressed` receipts remain visible failures
+for review. Authentication and permanent request errors are not retried blindly.
+Missing/malformed receipts, rate limits, server errors and network failures can be
+retried with the same ID. A disabled client never acknowledges an outbox row.
+
+The existing `track()`/`flush()` API remains request-buffered. Batch responses must
+acknowledge all submitted events before the SDK clears them; partial/invalid
+responses retain the batch because the API does not identify rejected items.
+Use `publish()` for durable outcomes, where individual receipts matter. Custom
+transports can opt in through `PublisherTransportInterface`; older transports
+remain compatible with buffered tracking.
