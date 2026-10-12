@@ -31,7 +31,7 @@ use Whisperr\Laravel\Facades\Whisperr;
 Whisperr::track(auth()->id(), 'plan_upgraded', ['plan' => 'pro']);
 
 // In a Stripe webhook / job — use the id from your domain data:
-Whisperr::track($subscription->user_id, 'payment_failed', ['amount_cents' => 4900]);
+Whisperr::track($subscription->user_id, 'billing_issue_started', ['failure_code' => 'card_declined']);
 
 // Associate traits / contact channels:
 Whisperr::identify(auth()->id(), ['traits' => ['plan' => 'pro'], 'email' => $user->email]);
@@ -47,7 +47,7 @@ use Whisperr\Whisperr;
 
 $whisperr = new Whisperr(['api_key' => getenv('WHISPERR_API_KEY')]);
 
-$whisperr->track('user_8842', 'subscription_cancelled', ['reason' => 'card_declined']);
+$whisperr->track('user_8842', 'membership_ended', ['end_reason' => 'billing']);
 
 $whisperr->flush(); // also auto-flushes on shutdown
 ```
@@ -72,29 +72,49 @@ the language.
 
 ## Billing events
 
-Whisperr reserves these billing fallback event names. Use the
+Whisperr reserves these billing fallback event names (playbook engine spec
+section 3.8). Send them from your backend, never from the front end. Use the
 `Whisperr\BillingEvent` constants and `BillingEvent::properties()`:
 
 | Constant | Event name |
 |---|---|
 | `BillingEvent::TRIAL_STARTED` | `trial_started` |
-| `BillingEvent::SUBSCRIPTION_STARTED` | `subscription_started` |
-| `BillingEvent::SUBSCRIPTION_RENEWED` | `subscription_renewed` |
-| `BillingEvent::PAYMENT_FAILED` | `payment_failed` |
-| `BillingEvent::SUBSCRIPTION_CANCELLED` | `subscription_cancelled` |
-| `BillingEvent::PURCHASE_COMPLETED` | `purchase_completed` |
+| `BillingEvent::TRIAL_CONVERTED` | `trial_converted` |
+| `BillingEvent::TRIAL_AUTO_RENEW_DISABLED` | `trial_auto_renew_disabled` |
+| `BillingEvent::MEMBERSHIP_STARTED` | `membership_started` |
+| `BillingEvent::RENEWAL_SUCCEEDED` | `renewal_succeeded` |
+| `BillingEvent::AUTO_RENEW_DISABLED` | `auto_renew_disabled` |
+| `BillingEvent::AUTO_RENEW_ENABLED` | `auto_renew_enabled` |
+| `BillingEvent::MEMBERSHIP_ENDED` | `membership_ended` |
+| `BillingEvent::BILLING_ISSUE_STARTED` | `billing_issue_started` |
+| `BillingEvent::BILLING_RECOVERED` | `billing_recovered` |
+| `BillingEvent::REFUND_GRANTED` | `refund_granted` |
+
+`properties()` builds the money properties: `plan_id`, `price`, `currency`,
+`plan_period`, `transaction_id`, `store`. Put the other properties of an event
+(see section 3.8) in `extra`.
 
 ```php
 use Whisperr\BillingEvent;
 
-$whisperr->track($subscription->user_id, BillingEvent::SUBSCRIPTION_RENEWED, BillingEvent::properties(
-    productId: 'pro_monthly',
+$whisperr->track($membership->user_id, BillingEvent::MEMBERSHIP_STARTED, BillingEvent::properties(
+    planId: 'pro_monthly',
     price: 9.99,          // major units: 9.99, not 999 cents
     currency: 'USD',      // ISO 4217; the helper changes 'usd' to 'USD'
-    period: 'P1M',        // ISO 8601 duration
+    planPeriod: 'P1M',    // ISO 8601 duration
     transactionId: 'txn_123',
     store: 'stripe',
-    extra: ['failure_code' => 'card_declined'], // more properties, optional
+    extra: ['is_first_ever' => true, 'current_period_ends_at' => '2026-11-12T08:00:00Z'],
+), messageId: "membership_started_{$membership->id}", occurredAt: $membership->started_at->toIso8601ZuluString());
+
+$whisperr->track($payment->user_id, BillingEvent::RENEWAL_SUCCEEDED, BillingEvent::properties(
+    planId: 'pro_monthly',
+    price: 9.99,
+    currency: 'USD',
+    planPeriod: 'P1M',
+    transactionId: (string) $payment->id,
+    store: 'stripe',
+    extra: ['paid_periods_count' => 2, 'current_period_ends_at' => '2026-12-12T08:00:00Z'],
 ), messageId: "renewal_{$payment->id}", occurredAt: $payment->paid_at->toIso8601ZuluString());
 ```
 
@@ -163,9 +183,9 @@ once, pass a stable message ID and the original occurrence time to `track()`:
 ```php
 Whisperr::track(
     (string) $invoice->user_id,
-    'payment_failed',
-    ['amount_cents' => $invoice->amount_due],
-    messageId: "stripe_invoice_{$invoice->id}_payment_failed",
+    'billing_issue_started',
+    ['failure_code' => 'card_declined'],
+    messageId: "stripe_invoice_{$invoice->id}_billing_issue_started",
     occurredAt: $invoice->failed_at->toIso8601ZuluString(), // e.g. 2026-10-12T08:00:00Z
 );
 ```

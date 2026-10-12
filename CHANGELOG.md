@@ -15,10 +15,13 @@ Whisperr spec contract v2 for server SDKs.
   event carries `context.app_version`. When it is empty, the key is not sent.
   A key that the caller puts in `$context` for one event wins.
 - `Whisperr\BillingEvent`: constants for the reserved billing fallback names
-  (`trial_started`, `subscription_started`, `subscription_renewed`,
-  `payment_failed`, `subscription_cancelled`, `purchase_completed`) and
-  `BillingEvent::properties()` for `product_id`, `price` (major units),
-  `currency` (ISO 4217, upper-cased), `period`, `transaction_id`, `store`.
+  from the playbook engine spec section 3.8 (`trial_started`,
+  `trial_converted`, `trial_auto_renew_disabled`, `membership_started`,
+  `renewal_succeeded`, `auto_renew_disabled`, `auto_renew_enabled`,
+  `membership_ended`, `billing_issue_started`, `billing_recovered`,
+  `refund_granted`) and `BillingEvent::properties()` for `plan_id`, `price`
+  (major units), `currency` (ISO 4217, upper-cased), `plan_period`,
+  `transaction_id`, `store`, plus extra event properties.
   It throws `InvalidArgumentException` for a currency that is not three
   letters, or a price that is negative or not finite.
 - README: the `app_language` trait and the billing fallback events.

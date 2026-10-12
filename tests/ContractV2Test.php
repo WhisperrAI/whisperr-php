@@ -153,14 +153,39 @@ final class ContractV2Test extends TestCase
     {
         $this->assertSame([
             'trial_started',
-            'subscription_started',
-            'subscription_renewed',
-            'payment_failed',
-            'subscription_cancelled',
-            'purchase_completed',
+            'trial_converted',
+            'trial_auto_renew_disabled',
+            'membership_started',
+            'renewal_succeeded',
+            'auto_renew_disabled',
+            'auto_renew_enabled',
+            'membership_ended',
+            'billing_issue_started',
+            'billing_recovered',
+            'refund_granted',
         ], BillingEvent::ALL);
         foreach (BillingEvent::ALL as $name) {
             $this->assertMatchesRegularExpression('/^[a-z0-9]+(?:_[a-z0-9]+)*$/', $name);
+        }
+    }
+
+    public function testBillingEventNamesMatchTheSpecSchema(): void
+    {
+        $wire = getenv('WHISPERR_SPEC_PATH');
+        $schema = ($wire !== false && $wire !== '')
+            ? @file_get_contents(dirname($wire, 2) . '/schemas/wire.schema.json')
+            : false;
+        if ($schema === false) {
+            $this->markTestSkipped('set WHISPERR_SPEC_PATH to a whisperr-spec checkout');
+        }
+        $defs = json_decode($schema, true, 512, JSON_THROW_ON_ERROR)['$defs'];
+        if (!isset($defs['billing_event'])) {
+            $this->markTestSkipped('this spec has no billing_event definition');
+        }
+        $this->assertSame($defs['billing_event']['properties']['event_type']['enum'], BillingEvent::ALL);
+        $specProperties = array_keys($defs['billing_event']['properties']['properties']['properties']);
+        foreach (array_keys(BillingEvent::properties('p', 1.0, 'USD', 'P1M', 't', 's')) as $key) {
+            $this->assertContains($key, $specProperties, "money property $key is in the spec");
         }
     }
 
@@ -169,11 +194,11 @@ final class ContractV2Test extends TestCase
         $transport = new ScriptedTransport();
         $transport->respond(202, ['accepted' => 1, 'rejected' => 0]);
         $client = $this->client($transport);
-        $client->track('u1', BillingEvent::SUBSCRIPTION_RENEWED, BillingEvent::properties(
-            productId: 'pro_monthly',
+        $client->track('u1', BillingEvent::RENEWAL_SUCCEEDED, BillingEvent::properties(
+            planId: 'pro_monthly',
             price: 9.99,
             currency: ' gel ',
-            period: 'P1M',
+            planPeriod: 'P1M',
             transactionId: 'txn_123',
             store: 'app_store',
         ), messageId: 'renewal_42', occurredAt: '2026-10-12T08:00:00Z');
@@ -182,15 +207,15 @@ final class ContractV2Test extends TestCase
         $raw = (string) json_encode($transport->requests[0]['body']);
         $this->assertStringContainsString('"price":9.99', $raw);
         $this->assertSame([
-            'product_id' => 'pro_monthly',
+            'plan_id' => 'pro_monthly',
             'price' => 9.99,
             'currency' => 'GEL',
-            'period' => 'P1M',
+            'plan_period' => 'P1M',
             'transaction_id' => 'txn_123',
             'store' => 'app_store',
         ], $this->wire($transport)['events'][0]['properties']);
         $event = $this->wire($transport)['events'][0];
-        $this->assertSame('subscription_renewed', $event['event_type']);
+        $this->assertSame('renewal_succeeded', $event['event_type']);
         $this->assertSame('2026-10-12T08:00:00Z', $event['occurred_at']);
         $this->assertSame('renewal_42', $event['context']['$message_id']);
         $this->assertSame('whisperr-php', $event['context']['sdk_name']);
