@@ -95,12 +95,15 @@ $whisperr->track($subscription->user_id, BillingEvent::SUBSCRIPTION_RENEWED, Bil
     transactionId: 'txn_123',
     store: 'stripe',
     extra: ['failure_code' => 'card_declined'], // more properties, optional
-));
+), messageId: "renewal_{$payment->id}", occurredAt: $payment->paid_at->toIso8601ZuluString());
 ```
 
 - An argument you do not give adds no property.
 - `properties()` throws `InvalidArgumentException` when `currency` is not three
   letters, or `price` is negative or not a finite number.
+- Billing code can run twice (cron, payment callbacks). Pass a stable
+  `messageId` and the real billing time as `occurredAt` (see
+  [Idempotent server events](#idempotent-server-events)).
 - From an outbox worker, use the same properties with `publish()` (see
   [Durable backend outcomes](#durable-backend-outcomes)).
 - **Register the event names first.** Today the server stores these events only

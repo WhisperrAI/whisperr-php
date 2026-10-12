@@ -24,6 +24,12 @@ Whisperr spec contract v2 for server SDKs.
 - README: the `app_language` trait and the billing fallback events.
 - Tests run the server sections of whisperr-spec `conformance/v2.json`.
 
+## 0.2.1 - 2026-10-12
+
+- `track()` takes optional `messageId` and `occurredAt` arguments for
+  idempotent server events. An invalid value drops the event; `track()` never
+  throws.
+
 ## 0.2.0 - 2026-10-12
 
 - PHP 8.0+ and Laravel 8 (Illuminate ^8.83) through 11.

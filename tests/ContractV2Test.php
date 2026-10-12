@@ -176,7 +176,7 @@ final class ContractV2Test extends TestCase
             period: 'P1M',
             transactionId: 'txn_123',
             store: 'app_store',
-        ));
+        ), messageId: 'renewal_42', occurredAt: '2026-10-12T08:00:00Z');
         $client->flush();
 
         $raw = (string) json_encode($transport->requests[0]['body']);
@@ -189,7 +189,11 @@ final class ContractV2Test extends TestCase
             'transaction_id' => 'txn_123',
             'store' => 'app_store',
         ], $this->wire($transport)['events'][0]['properties']);
-        $this->assertSame('subscription_renewed', $this->wire($transport)['events'][0]['event_type']);
+        $event = $this->wire($transport)['events'][0];
+        $this->assertSame('subscription_renewed', $event['event_type']);
+        $this->assertSame('2026-10-12T08:00:00Z', $event['occurred_at']);
+        $this->assertSame('renewal_42', $event['context']['$message_id']);
+        $this->assertSame('whisperr-php', $event['context']['sdk_name']);
     }
 
     public function testBillingPropertiesOmitNullsCastPriceAndKeepExtras(): void
