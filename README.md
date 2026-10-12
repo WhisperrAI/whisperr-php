@@ -21,6 +21,7 @@ php artisan vendor:publish --tag=whisperr-config
 ```dotenv
 # .env
 WHISPERR_API_KEY=wrk_...
+WHISPERR_APP_VERSION=2026.10.1   # optional: your backend release
 ```
 
 ```php
@@ -30,7 +31,7 @@ use Whisperr\Laravel\Facades\Whisperr;
 Whisperr::track(auth()->id(), 'plan_upgraded', ['plan' => 'pro']);
 
 // In a Stripe webhook / job — use the id from your domain data:
-Whisperr::track($subscription->user_id, 'payment_failed', ['amount_cents' => 4900]);
+Whisperr::track($subscription->user_id, 'billing_issue_started', ['failure_code' => 'card_declined']);
 
 // Associate traits / contact channels:
 Whisperr::identify(auth()->id(), ['traits' => ['plan' => 'pro'], 'email' => $user->email]);
@@ -46,7 +47,7 @@ use Whisperr\Whisperr;
 
 $whisperr = new Whisperr(['api_key' => getenv('WHISPERR_API_KEY')]);
 
-$whisperr->track('user_8842', 'subscription_cancelled', ['reason' => 'card_declined']);
+$whisperr->track('user_8842', 'membership_ended', ['end_reason' => 'billing']);
 
 $whisperr->flush(); // also auto-flushes on shutdown
 ```
@@ -54,6 +55,88 @@ $whisperr->flush(); // also auto-flushes on shutdown
 The user id (`external_user_id`) is **always explicit** — the server has no
 session to infer it from. Pass the same id you use everywhere else for that user,
 and frontend + backend events land on one timeline automatically.
+
+## User language (`app_language`)
+
+`app_language` is the language the user picked in your product (not the device
+or browser locale). Whisperr writes messages in this language. Send it as a
+trait on `identify()`. Use a BCP 47 tag, such as `de` or `pt-BR`:
+
+```php
+$whisperr->identify($user->id, ['traits' => ['app_language' => 'pt-BR']]);
+```
+
+The server SDK has no special API for it, and it does not change the value.
+The server keeps the last value it got. Send it again when the user changes
+the language.
+
+## Billing events
+
+Whisperr reserves these billing fallback event names (playbook engine spec
+section 3.8). Send them from your backend, never from the front end. Use the
+`Whisperr\BillingEvent` constants and `BillingEvent::properties()`:
+
+| Constant | Event name |
+|---|---|
+| `BillingEvent::TRIAL_STARTED` | `trial_started` |
+| `BillingEvent::TRIAL_CONVERTED` | `trial_converted` |
+| `BillingEvent::TRIAL_AUTO_RENEW_DISABLED` | `trial_auto_renew_disabled` |
+| `BillingEvent::MEMBERSHIP_STARTED` | `membership_started` |
+| `BillingEvent::RENEWAL_SUCCEEDED` | `renewal_succeeded` |
+| `BillingEvent::AUTO_RENEW_DISABLED` | `auto_renew_disabled` |
+| `BillingEvent::AUTO_RENEW_ENABLED` | `auto_renew_enabled` |
+| `BillingEvent::MEMBERSHIP_ENDED` | `membership_ended` |
+| `BillingEvent::BILLING_ISSUE_STARTED` | `billing_issue_started` |
+| `BillingEvent::BILLING_RECOVERED` | `billing_recovered` |
+| `BillingEvent::REFUND_GRANTED` | `refund_granted` |
+
+`properties()` builds the money properties: `plan_id`, `price`, `currency`,
+`plan_period`, `transaction_id`, `store`. Put the other properties of an event
+(see section 3.8) in `extra`.
+
+```php
+use Whisperr\BillingEvent;
+
+$whisperr->track($membership->user_id, BillingEvent::MEMBERSHIP_STARTED, BillingEvent::properties(
+    planId: 'pro_monthly',
+    price: 9.99,          // major units: 9.99, not 999 cents
+    currency: 'USD',      // ISO 4217; the helper changes 'usd' to 'USD'
+    planPeriod: 'P1M',    // ISO 8601 duration
+    transactionId: 'txn_123',
+    store: 'stripe',
+    extra: ['is_first_ever' => true, 'current_period_ends_at' => '2026-11-12T08:00:00Z'],
+), messageId: "membership_started_{$membership->id}", occurredAt: $membership->started_at->toIso8601ZuluString());
+
+$whisperr->track($payment->user_id, BillingEvent::RENEWAL_SUCCEEDED, BillingEvent::properties(
+    planId: 'pro_monthly',
+    price: 9.99,
+    currency: 'USD',
+    planPeriod: 'P1M',
+    transactionId: (string) $payment->id,
+    store: 'stripe',
+    extra: ['paid_periods_count' => 2, 'current_period_ends_at' => '2026-12-12T08:00:00Z'],
+), messageId: "renewal_{$payment->id}", occurredAt: $payment->paid_at->toIso8601ZuluString());
+```
+
+- An argument you do not give adds no property.
+- `properties()` throws `InvalidArgumentException` when `currency` is not three
+  letters, or `price` is negative or not a finite number.
+- Billing code can run twice (cron, payment callbacks). Pass a stable
+  `messageId` and the real billing time as `occurredAt` (see
+  [Idempotent server events](#idempotent-server-events)).
+- From an outbox worker, use the same properties with `publish()` (see
+  [Durable backend outcomes](#durable-backend-outcomes)).
+- **Register the event names first.** Today the server stores these events only
+  after your app registers them. The Whisperr MCP does this for you. A later
+  server change will accept them without registration.
+
+## Versions on every event
+
+Every event carries `context.sdk_name` (`whisperr-php`) and
+`context.sdk_version` (`Whisperr::VERSION`). Set `app_version` (Laravel:
+`WHISPERR_APP_VERSION`) to your backend release, and every event also carries
+`context.app_version`. When `app_version` is empty, the SDK sends no
+`app_version` key. A key you put in the `$context` argument of one event wins.
 
 ## Design
 
@@ -79,6 +162,7 @@ and frontend + backend events land on one timeline automatically.
 | `max_batch_size` | `500` | Events per batch (hard backend cap is 500). |
 | `max_retries` | `3` | Retries before giving up a batch. |
 | `request_timeout` | `10.0` | Per-request timeout (seconds). |
+| `app_version` | — | Your backend release. Sent as `context.app_version` on every event. |
 | `disabled` | `false` | No-op client (useful in tests). |
 | `debug` | `false` | Verbose logging via `error_log`. |
 | `on_error` | — | `callable(WhisperrError): void` for observability. |
@@ -99,9 +183,9 @@ once, pass a stable message ID and the original occurrence time to `track()`:
 ```php
 Whisperr::track(
     (string) $invoice->user_id,
-    'payment_failed',
-    ['amount_cents' => $invoice->amount_due],
-    messageId: "stripe_invoice_{$invoice->id}_payment_failed",
+    'billing_issue_started',
+    ['failure_code' => 'card_declined'],
+    messageId: "stripe_invoice_{$invoice->id}_billing_issue_started",
     occurredAt: $invoice->failed_at->toIso8601ZuluString(), // e.g. 2026-10-12T08:00:00Z
 );
 ```

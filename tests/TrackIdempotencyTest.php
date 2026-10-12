@@ -63,7 +63,10 @@ final class TrackIdempotencyTest extends TestCase
         $w->flush();
 
         $event = $this->wireEvents($transport)[0];
-        $this->assertSame(['$message_id' => 'inv_9_failed'], $event['context']);
+        $this->assertSame(
+            ['sdk_name' => 'whisperr-php', 'sdk_version' => \Whisperr\Whisperr::VERSION, '$message_id' => 'inv_9_failed'],
+            $event['context'],
+        );
         $this->assertSame('2026-10-12T08:00:00Z', $event['occurred_at']);
     }
 
