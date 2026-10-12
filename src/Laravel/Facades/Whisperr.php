@@ -9,7 +9,7 @@ use Whisperr\Whisperr as WhisperrClient;
 
 /**
  * @method static void identify(string $externalUserId, array $params = [])
- * @method static void track(string $externalUserId, string $eventType, array $properties = [], array $context = [])
+ * @method static void track(string $externalUserId, string $eventType, array $properties = [], array $context = [], ?string $messageId = null, ?string $occurredAt = null)
  * @method static \Whisperr\PublishResult publish(string $externalUserId, string $eventType, array $properties, string $messageId, string $occurredAt, array $context = [])
  * @method static void flush()
  *

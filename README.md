@@ -91,6 +91,34 @@ PHP 8.0 or later is supported. The runtime package uses only `ext-curl` and
 PHPUnit 9.6, and PHP 8.1–8.3 with compatible Illuminate 10/11 versions. This
 includes service-provider registration and termination behavior.
 
+## Idempotent server events
+
+A cron job or a payment callback can run twice. To record such an event only
+once, pass a stable message ID and the original occurrence time to `track()`:
+
+```php
+Whisperr::track(
+    (string) $invoice->user_id,
+    'payment_failed',
+    ['amount_cents' => $invoice->amount_due],
+    messageId: "stripe_invoice_{$invoice->id}_payment_failed",
+    occurredAt: $invoice->failed_at->toIso8601ZuluString(), // e.g. 2026-10-12T08:00:00Z
+);
+```
+
+- The server keeps one event per message ID for each app. A second `track()`
+  with the same ID is a no-op. Build the ID from your domain data, not from the
+  current time.
+- The message ID must be nonempty, have no leading or trailing spaces, and be
+  at most 200 bytes.
+- `occurredAt` must be RFC3339 with a timezone (`Z` or `+04:00`). The server
+  accepts times up to 30 days in the past and 5 minutes in the future.
+- An invalid message ID or time drops the event with a `dropped` error and a
+  debug warning. `track()` never throws.
+- Retries inside `flush()` resend the same ID and time.
+- Without these arguments, `track()` uses a random ID and the current time, as
+  before.
+
 ## Durable backend outcomes
 
 Use `publish()` from a durable outbox worker when losing a committed outcome is
