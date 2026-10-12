@@ -83,10 +83,6 @@ and frontend + backend events land on one timeline automatically.
 | `debug` | `false` | Verbose logging via `error_log`. |
 | `on_error` | — | `callable(WhisperrError): void` for observability. |
 
----
-
-Whisperr — predict churn, automate interventions, recover revenue.
-[whisperr.net](https://whisperr.net)
 
 ## Runtime support
 
@@ -101,7 +97,8 @@ Use `publish()` from a durable outbox worker when losing a committed outcome is
 unacceptable. Unlike `track()`, it is synchronous, makes **one HTTP attempt**,
 and returns an authoritative ingestion receipt. It requires a server ingestion
 key **bound to the approved Whisperr source producer**. A legacy key's generic
-2xx response is not accepted as proof of durable source ingestion.
+2xx response is not accepted as proof of durable source ingestion: with an
+unbound key, every `publish()` returns a retryable `invalid_receipt` result.
 
 Insert an outbox row in the **same database transaction** as the business change.
 Persist its unique event ID, original RFC3339 occurrence timestamp, stable user
@@ -143,9 +140,14 @@ for review. Authentication and permanent request errors are not retried blindly.
 Missing/malformed receipts, rate limits, server errors and network failures can be
 retried with the same ID. A disabled client never acknowledges an outbox row.
 
-The existing `track()`/`flush()` API remains request-buffered. Batch responses must
-acknowledge all submitted events before the SDK clears them; partial/invalid
-responses retain the batch because the API does not identify rejected items.
+The existing `track()`/`flush()` API remains request-buffered and follows the
+shared SDK delivery contract: any `2xx` batch response dequeues the batch. Events
+the server counts as `rejected` failed shape validation and are not resent.
 Use `publish()` for durable outcomes, where individual receipts matter. Custom
 transports can opt in through `PublisherTransportInterface`; older transports
 remain compatible with buffered tracking.
+
+---
+
+Whisperr — predict churn, automate interventions, recover revenue.
+[whisperr.net](https://whisperr.net)

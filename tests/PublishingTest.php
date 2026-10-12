@@ -70,21 +70,35 @@ final class PublishingTest extends TestCase
         }
     }
 
-    public function testPartialAndMalformedBatchAcknowledgmentsRetainStableEvents(): void
+    public function testAnyBatch2xxDequeuesPerSpecEvenWithRejectedOrMalformedBody(): void
     {
-        foreach ([['accepted' => 1, 'rejected' => 1], ['accepted' => 2, 'rejected' => 1], ['accepted' => '2', 'rejected' => 0], []] as $response) {
+        // whisperr-spec delivery contract: a 2xx means the server owns the batch;
+        // `rejected` events failed shape validation and can never succeed.
+        foreach ([['accepted' => 1, 'rejected' => 1], ['accepted' => 0, 'rejected' => 2], []] as $response) {
             $transport = new ScriptedTransport();
             $transport->respond(202, $response);
-            $transport->respond(202, ['accepted' => 2, 'rejected' => 0]);
             $client = $this->client($transport);
             $client->track('42', 'first_event');
             $client->track('42', 'second_event');
             $client->flush();
             $client->flush();
-            $client->flush();
-            $this->assertCount(2, $transport->requests);
-            $this->assertSame(json_encode($transport->requests[0]), json_encode($transport->requests[1]));
+            $this->assertCount(1, $transport->requests);
         }
+    }
+
+    public function testUnencodableEventsNeverThrowFromFlushOrPublish(): void
+    {
+        $transport = new ScriptedTransport();
+        $client = $this->client($transport);
+        $client->track('42', 'bad_bytes', ['name' => "\xB1\x31"]);
+        $client->flush(); // must not throw: flush also runs at shutdown
+        $client->flush();
+        $this->assertSame([], $transport->requests);
+
+        $result = $client->publish('42', 'order_completed', ['name' => "\xB1\x31"], 'mid', '2026-09-21T00:00:00Z');
+        $this->assertFalse($result->acknowledged());
+        $this->assertFalse($result->retryable());
+        $this->assertSame('invalid_payload', $result->errorCode());
     }
 
     public function testInvalidReplayValuesNeverReachTransport(): void

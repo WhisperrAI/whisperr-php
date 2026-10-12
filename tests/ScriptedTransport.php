@@ -16,9 +16,9 @@ final class ScriptedTransport extends Transport
         parent::__construct('https://example.invalid', 'server_key', 1.0, fn ($message) => null);
     }
 
-    protected function request(string $method, string $path, ?array $body = null): array
+    protected function request(string $method, string $path, string $json): array
     {
-        $this->requests[] = ['method' => $method, 'path' => $path, 'body' => $body];
+        $this->requests[] = ['method' => $method, 'path' => $path, 'body' => json_decode($json, true)];
         return array_shift($this->responses) ?? ['status' => null, 'body' => ''];
     }
 

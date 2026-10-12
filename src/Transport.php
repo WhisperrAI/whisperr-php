@@ -85,7 +85,11 @@ class Transport implements TransportInterface, PublisherTransportInterface
     /** @param array<string,mixed> $event */
     public function publishEvent(array $event): PublishResult
     {
-        $response = $this->request('POST', '/v1/events/track', $this->eventBody($event));
+        try {
+            $response = $this->request('POST', '/v1/events/track', self::encode($this->eventBody($event)));
+        } catch (\JsonException $e) {
+            return new PublishResult(false, false, null, null, null, false, 'invalid_payload');
+        }
         $status = $response['status'];
         $body = json_decode($response['body'], true);
         if ($status === null || $status === 429 || $status >= 500) {
@@ -119,21 +123,25 @@ class Transport implements TransportInterface, PublisherTransportInterface
     /** @param array<string,mixed> $body */
     protected function post(string $path, array $body): string
     {
-        $response = $this->request('POST', $path, $body);
+        try {
+            $response = $this->request('POST', $path, self::encode($body));
+        } catch (\JsonException $e) {
+            // e.g. invalid UTF-8 in properties: unsendable forever, and flush()
+            // runs at shutdown, so never let it throw into the host.
+            ($this->warn)("request to $path dropped (unencodable JSON: {$e->getMessage()})");
+            return 'drop';
+        }
         $status = $response['status'];
         if ($status === null) {
             return 'retry';
         }
         if ($status >= 200 && $status < 300) {
-            if ($path === '/v1/events/batch') {
-                $ack = json_decode($response['body'], true);
-                if (!is_array($ack) || ($ack['accepted'] ?? null) !== count($body['events'])
-                    || ($ack['rejected'] ?? null) !== 0) {
-                    ($this->warn)('batch response did not acknowledge every event; retaining the batch');
-                    // No per-item receipt exists. Replay the same IDs; never
-                    // guess which events a partial acceptance refers to.
-                    return 'retry';
-                }
+            // Spec delivery contract: a 2xx means the server owns the batch.
+            // `rejected` counts events that failed shape validation; resending
+            // them can never succeed, so they are reported, not retried.
+            $ack = $path === '/v1/events/batch' ? json_decode($response['body'], true) : null;
+            if (is_array($ack) && is_int($ack['rejected'] ?? null) && $ack['rejected'] > 0) {
+                ($this->warn)("server rejected {$ack['rejected']} event(s) in the batch as invalid");
             }
             return 'ok';
         }
@@ -149,13 +157,20 @@ class Transport implements TransportInterface, PublisherTransportInterface
     }
 
     /**
+     * @param array<string,mixed> $body
+     * @throws \JsonException
+     */
+    private static function encode(array $body): string
+    {
+        return json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    /**
      * One attempt, with redirects disabled so credentials never follow them.
-     * @param array<string,mixed>|null $body
      * @return array{status:int|null,body:string}
      */
-    protected function request(string $method, string $path, ?array $body = null): array
+    protected function request(string $method, string $path, string $json): array
     {
-        $encoded = $body === null ? null : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $ch = curl_init(rtrim($this->baseUrl, '/') . $path);
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => $method,
@@ -166,10 +181,8 @@ class Transport implements TransportInterface, PublisherTransportInterface
                 'Content-Type: application/json',
                 'X-API-Key: ' . $this->apiKey,
             ],
+            CURLOPT_POSTFIELDS => $json,
         ]);
-        if ($encoded !== null) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $encoded);
-        }
         $response = curl_exec($ch);
         $status = $response === false ? null : (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
