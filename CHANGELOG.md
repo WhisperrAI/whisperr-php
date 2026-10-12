@@ -3,7 +3,7 @@
 Packagist reads versions from git tags (`vX.Y.Z`). `Whisperr::VERSION` must
 match the newest entry here; a test checks it.
 
-## 0.3.0 - unreleased
+## 0.3.0 - 2026-10-12
 
 Whisperr spec contract v2 for server SDKs.
 
