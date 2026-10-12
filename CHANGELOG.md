@@ -20,8 +20,9 @@ Whisperr spec contract v2 for server SDKs.
   `BillingEvent::properties()` for `product_id`, `price` (major units),
   `currency` (ISO 4217, upper-cased), `period`, `transaction_id`, `store`.
   It throws `InvalidArgumentException` for a currency that is not three
-  letters or a price that is not finite.
+  letters, or a price that is negative or not finite.
 - README: the `app_language` trait and the billing fallback events.
+- Tests run the server sections of whisperr-spec `conformance/v2.json`.
 
 ## 0.2.0 - 2026-10-12
 

@@ -46,7 +46,7 @@ final class BillingEvent
      * @param string|null $period ISO 8601 duration, for example 'P1M'
      * @param array<string,mixed> $extra more properties for the same event
      * @return array<string,mixed>
-     * @throws \InvalidArgumentException when price is not finite or currency is not three letters
+     * @throws \InvalidArgumentException when price is negative or not finite, or currency is not three letters
      */
     public static function properties(
         ?string $productId = null,
@@ -62,8 +62,8 @@ final class BillingEvent
             $typed['product_id'] = $productId;
         }
         if ($price !== null) {
-            if (!is_finite((float) $price)) {
-                throw new \InvalidArgumentException('price must be a finite number in major units, for example 9.99');
+            if (!is_finite((float) $price) || $price < 0) {
+                throw new \InvalidArgumentException('price must be a finite number >= 0 in major units, for example 9.99');
             }
             $typed['price'] = (float) $price;
         }

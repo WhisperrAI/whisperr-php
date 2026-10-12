@@ -202,7 +202,7 @@ final class ContractV2Test extends TestCase
 
     public function testBillingPropertiesRejectBadCurrencyAndNonFinitePrice(): void
     {
-        foreach ([['currency' => 'US'], ['currency' => 'USDT'], ['currency' => '978'], ['price' => INF], ['price' => NAN]] as $args) {
+        foreach ([['currency' => 'US'], ['currency' => 'USDT'], ['currency' => '978'], ['price' => INF], ['price' => NAN], ['price' => -1.5]] as $args) {
             try {
                 BillingEvent::properties(...$args);
                 $this->fail('accepted ' . json_encode(array_keys($args)));

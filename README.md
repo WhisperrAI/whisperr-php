@@ -100,7 +100,7 @@ $whisperr->track($subscription->user_id, BillingEvent::SUBSCRIPTION_RENEWED, Bil
 
 - An argument you do not give adds no property.
 - `properties()` throws `InvalidArgumentException` when `currency` is not three
-  letters or `price` is not a finite number.
+  letters, or `price` is negative or not a finite number.
 - From an outbox worker, use the same properties with `publish()` (see
   [Durable backend outcomes](#durable-backend-outcomes)).
 - **Register the event names first.** Today the server stores these events only
