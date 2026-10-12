@@ -79,11 +79,25 @@ class Whisperr
     }
 
     /**
+     * Queue one event. By default the SDK assigns a random message ID and the
+     * current time. Pass $messageId (and the original $occurredAt) when the same
+     * event can be tracked more than once, e.g. from a cron job or a payment
+     * callback that can run twice: the server stores one event per message ID.
+     * An invalid $messageId or $occurredAt drops the event with a warning.
+     *
      * @param array<string,mixed> $properties
      * @param array<string,mixed> $context
+     * @param string|null $messageId nonempty, unpadded, at most 200 bytes
+     * @param string|null $occurredAt RFC3339 with a timezone, e.g. 2026-10-12T08:00:00Z
      */
-    public function track(string $externalUserId, string $eventType, array $properties = [], array $context = []): void
-    {
+    public function track(
+        string $externalUserId,
+        string $eventType,
+        array $properties = [],
+        array $context = [],
+        ?string $messageId = null,
+        ?string $occurredAt = null
+    ): void {
         $eventType = trim($eventType);
         if ($this->disabled || $externalUserId === '' || $eventType === '') {
             return;
@@ -93,14 +107,24 @@ class Whisperr
             $this->warn("invalid event_type \"$eventType\" — event was not queued");
             return;
         }
+        if ($messageId !== null && !self::validMessageId($messageId)) {
+            $this->emit('dropped', 'invalid message_id — expected a nonempty, unpadded string of at most 200 bytes');
+            $this->warn("invalid message_id for \"$eventType\" — event was not queued");
+            return;
+        }
+        if ($occurredAt !== null && !self::validOccurredAt($occurredAt)) {
+            $this->emit('dropped', 'invalid occurred_at — expected an RFC3339 timestamp with a timezone');
+            $this->warn("invalid occurred_at \"$occurredAt\" for \"$eventType\" — event was not queued");
+            return;
+        }
         $this->queue[] = [
             'kind' => 'track',
             'external_user_id' => $externalUserId,
             'event_type' => $eventType,
             'properties' => $properties,
             'context' => $context,
-            'occurred_at' => $this->nowIso(),
-            'message_id' => $this->uuid(),
+            'occurred_at' => $occurredAt ?? $this->nowIso(),
+            'message_id' => $messageId ?? $this->uuid(),
         ];
         $this->maybeFlush();
     }
@@ -127,16 +151,12 @@ class Whisperr
         if (!preg_match(self::SNAKE_CASE, $eventType)) {
             throw new \InvalidArgumentException('eventType must be snake_case');
         }
-        if ($messageId === '' || trim($messageId) !== $messageId || strlen($messageId) > 200) {
+        if (!self::validMessageId($messageId)) {
             throw new \InvalidArgumentException('messageId must be a nonempty, unpadded string of at most 200 bytes');
         }
         // Do not normalize or replace an original occurrence time on replay.
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/D', $occurredAt)) {
-            throw new \InvalidArgumentException('occurredAt must be an RFC3339 timestamp with a timezone');
-        }
-        $parts = date_parse($occurredAt);
-        if ($parts['error_count'] || $parts['warning_count']) {
-            throw new \InvalidArgumentException('occurredAt must be a valid date and time');
+        if (!self::validOccurredAt($occurredAt)) {
+            throw new \InvalidArgumentException('occurredAt must be a valid RFC3339 timestamp with a timezone');
         }
         if ($this->disabled) {
             return new PublishResult(false, false, null, null, null, false, 'disabled');
@@ -246,6 +266,21 @@ class Whisperr
             $out[] = ['type' => 'push', 'address' => $p['push_token'], 'opted_in' => true];
         }
         return $out ?: null;
+    }
+
+    private static function validMessageId(string $messageId): bool
+    {
+        // The server trims the ID and ignores IDs over 200 bytes (no dedupe).
+        return $messageId !== '' && trim($messageId) === $messageId && strlen($messageId) <= 200;
+    }
+
+    private static function validOccurredAt(string $occurredAt): bool
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/D', $occurredAt)) {
+            return false;
+        }
+        $parts = date_parse($occurredAt);
+        return !$parts['error_count'] && !$parts['warning_count'];
     }
 
     private function backoff(int $attempt): float
