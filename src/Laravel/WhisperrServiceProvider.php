@@ -20,6 +20,7 @@ class WhisperrServiceProvider extends ServiceProvider
                 'base_url' => $cfg['base_url'] ?? 'https://api.whisperr.net',
                 'disabled' => $cfg['disabled'] ?? false,
                 'debug' => $cfg['debug'] ?? false,
+                'app_version' => $cfg['app_version'] ?? null,
             ]);
         });
         $this->app->alias(Whisperr::class, 'whisperr');

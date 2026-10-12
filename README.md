@@ -21,6 +21,7 @@ php artisan vendor:publish --tag=whisperr-config
 ```dotenv
 # .env
 WHISPERR_API_KEY=wrk_...
+WHISPERR_APP_VERSION=2026.10.1   # optional: your backend release
 ```
 
 ```php
@@ -55,6 +56,65 @@ The user id (`external_user_id`) is **always explicit** — the server has no
 session to infer it from. Pass the same id you use everywhere else for that user,
 and frontend + backend events land on one timeline automatically.
 
+## User language (`app_language`)
+
+`app_language` is the language the user picked in your product (not the device
+or browser locale). Whisperr writes messages in this language. Send it as a
+trait on `identify()`. Use a BCP 47 tag, such as `de` or `pt-BR`:
+
+```php
+$whisperr->identify($user->id, ['traits' => ['app_language' => 'pt-BR']]);
+```
+
+The server SDK has no special API for it, and it does not change the value.
+The server keeps the last value it got. Send it again when the user changes
+the language.
+
+## Billing events
+
+Whisperr reserves these billing fallback event names. Use the
+`Whisperr\BillingEvent` constants and `BillingEvent::properties()`:
+
+| Constant | Event name |
+|---|---|
+| `BillingEvent::TRIAL_STARTED` | `trial_started` |
+| `BillingEvent::SUBSCRIPTION_STARTED` | `subscription_started` |
+| `BillingEvent::SUBSCRIPTION_RENEWED` | `subscription_renewed` |
+| `BillingEvent::PAYMENT_FAILED` | `payment_failed` |
+| `BillingEvent::SUBSCRIPTION_CANCELLED` | `subscription_cancelled` |
+| `BillingEvent::PURCHASE_COMPLETED` | `purchase_completed` |
+
+```php
+use Whisperr\BillingEvent;
+
+$whisperr->track($subscription->user_id, BillingEvent::SUBSCRIPTION_RENEWED, BillingEvent::properties(
+    productId: 'pro_monthly',
+    price: 9.99,          // major units: 9.99, not 999 cents
+    currency: 'USD',      // ISO 4217; the helper changes 'usd' to 'USD'
+    period: 'P1M',        // ISO 8601 duration
+    transactionId: 'txn_123',
+    store: 'stripe',
+    extra: ['failure_code' => 'card_declined'], // more properties, optional
+));
+```
+
+- An argument you do not give adds no property.
+- `properties()` throws `InvalidArgumentException` when `currency` is not three
+  letters or `price` is not a finite number.
+- From an outbox worker, use the same properties with `publish()` (see
+  [Durable backend outcomes](#durable-backend-outcomes)).
+- **Register the event names first.** Today the server stores these events only
+  after your app registers them. The Whisperr MCP does this for you. A later
+  server change will accept them without registration.
+
+## Versions on every event
+
+Every event carries `context.sdk_name` (`whisperr-php`) and
+`context.sdk_version` (`Whisperr::VERSION`). Set `app_version` (Laravel:
+`WHISPERR_APP_VERSION`) to your backend release, and every event also carries
+`context.app_version`. When `app_version` is empty, the SDK sends no
+`app_version` key. A key you put in the `$context` argument of one event wins.
+
 ## Design
 
 - **Same wire contract as the other Whisperr SDKs.** Events post to
@@ -79,6 +139,7 @@ and frontend + backend events land on one timeline automatically.
 | `max_batch_size` | `500` | Events per batch (hard backend cap is 500). |
 | `max_retries` | `3` | Retries before giving up a batch. |
 | `request_timeout` | `10.0` | Per-request timeout (seconds). |
+| `app_version` | — | Your backend release. Sent as `context.app_version` on every event. |
 | `disabled` | `false` | No-op client (useful in tests). |
 | `debug` | `false` | Verbose logging via `error_log`. |
 | `on_error` | — | `callable(WhisperrError): void` for observability. |

@@ -21,6 +21,11 @@ use Whisperr\Contracts\PublisherTransportInterface;
  */
 class Whisperr
 {
+    /** SDK release. Sent as context.sdk_version on every event; matches the git tag (v0.3.0). */
+    public const VERSION = '0.3.0';
+    /** Sent as context.sdk_name on every event. */
+    public const SDK_NAME = 'whisperr-php';
+
     private const SNAKE_CASE = '/^[a-z0-9]+(?:_[a-z0-9]+)*$/';
     private const DEFAULT_BASE = 'https://api.whisperr.net';
 
@@ -33,6 +38,8 @@ class Whisperr
     /** @var callable(WhisperrError):void|null */
     private $onError;
     private TransportInterface $transport;
+    /** @var array<string,string> context keys the SDK adds to every event */
+    private array $environmentContext;
 
     /** @var array<int,array<string,mixed>> */
     private array $queue = [];
@@ -51,6 +58,11 @@ class Whisperr
         $this->maxRetries = (int) ($options['max_retries'] ?? 3);
         $this->debug = (bool) ($options['debug'] ?? false);
         $this->onError = $options['on_error'] ?? null;
+        $this->environmentContext = ['sdk_name' => self::SDK_NAME, 'sdk_version' => self::VERSION];
+        $appVersion = trim((string) ($options['app_version'] ?? ''));
+        if ($appVersion !== '') {
+            $this->environmentContext['app_version'] = $appVersion;
+        }
 
         $timeout = (float) ($options['request_timeout'] ?? 10.0);
         $this->transport = $options['transport']
@@ -122,7 +134,7 @@ class Whisperr
             'external_user_id' => $externalUserId,
             'event_type' => $eventType,
             'properties' => $properties,
-            'context' => $context,
+            'context' => $this->eventContext($context),
             'occurred_at' => $occurredAt ?? $this->nowIso(),
             'message_id' => $messageId ?? $this->uuid(),
         ];
@@ -168,7 +180,7 @@ class Whisperr
             'external_user_id' => $externalUserId,
             'event_type' => $eventType,
             'properties' => $properties,
-            'context' => $context,
+            'context' => $this->eventContext($context),
             'occurred_at' => $occurredAt,
             'message_id' => $messageId,
         ]);
@@ -212,6 +224,17 @@ class Whisperr
     }
 
     // ---- internals ----
+
+    /**
+     * SDK environment keys first, so a key the caller passes for one event wins.
+     *
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function eventContext(array $context): array
+    {
+        return array_merge($this->environmentContext, $context);
+    }
 
     private function maybeFlush(): void
     {
