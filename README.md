@@ -33,7 +33,9 @@ Whisperr::track(auth()->id(), 'plan_upgraded', ['plan' => 'pro']);
 // In a Stripe webhook / job — use the id from your domain data:
 Whisperr::track($subscription->user_id, 'billing_issue_started', ['failure_code' => 'card_declined']);
 
-// Associate traits / contact channels:
+// Associate traits / contact channels.
+// The email shortcut marks the address opted in. Send it only for a user
+// who agreed to email, according to your own records.
 Whisperr::identify(auth()->id(), ['traits' => ['plan' => 'pro'], 'email' => $user->email]);
 ```
 
