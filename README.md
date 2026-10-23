@@ -140,6 +140,90 @@ Every event carries `context.sdk_name` (`whisperr-php`) and
 `context.app_version`. When `app_version` is empty, the SDK sends no
 `app_version` key. A key you put in the `$context` argument of one event wins.
 
+## Catalog push
+
+Send your product catalog (or courses, content, plans) to Whisperr from your
+server, so messages can name real, in-stock items. Use a **server key**
+(`wrk_…`, Settings > API keys) from an environment variable such as
+`WHISPERR_SERVER_KEY`. Never commit or log it. A publishable key (`wpk_…`)
+throws `Whisperr\ConfigurationException` before anything is sent.
+
+Items and results use the wire field names (snake_case), so an array you build
+is exactly what Whisperr receives.
+
+```php
+use Whisperr\Money;
+use Whisperr\Whisperr;
+
+$whisperr = new Whisperr(['api_key' => getenv('WHISPERR_SERVER_KEY')]);
+
+// When a product is created or changes:
+$result = $whisperr->catalog()->upsert([
+    [
+        'source_item_id' => 'sku-1', // the same id you send as product_id in tracked events
+        'type' => 'product',
+        'name' => 'Trail Runner 2',
+        'url' => 'https://shop.example.com/products/trail-runner-2',
+        'availability' => 'available', // available | limited | unavailable | unknown
+        'updated_at' => $product->updated_at, // a DateTimeInterface or RFC 3339 string from your data
+        'price' => ['amount_minor' => Money::toMinorUnits('89.00', 'USD'), 'currency' => 'USD'],
+        'image_url' => 'https://cdn.example.com/trail-runner-2.jpg',
+        'compare_at_minor' => Money::toMinorUnits('110.00', 'USD'),
+        'product_type' => 'Running shoes',
+        'brand' => 'Acme',
+        'collections' => [['id' => 'running', 'name' => 'Running', 'url' => 'https://shop.example.com/collections/running']],
+        'tags' => ['summer'],
+        'extras' => ['color' => 'blue'],
+    ],
+]);
+// ['accepted', 'applied', 'unchanged', 'ignored_older', 'rejected' => [['index', 'source_item_id', 'code', 'message']]]
+
+// When products are removed:
+$whisperr->catalog()->delete(['sku-1', 'sku-2']);
+
+// Full sync (daily, or after a bulk import): items you do not upsert between
+// begin and complete are removed.
+$snapshot = $whisperr->catalog()->beginSnapshot();
+foreach ($pages as $page) {
+    $whisperr->catalog()->upsert($page);
+}
+$whisperr->catalog()->completeSnapshot($snapshot['snapshot_id'], $totalCount);
+
+// Every 30 minutes (a scheduled command), so Whisperr knows the catalog is still current:
+$whisperr->catalog()->heartbeat($totalCount);
+
+// Health of the pushed catalog:
+$health = $whisperr->catalog()->status(); // ['state' => 'ready', 'item_count' => ..., 'last_push_at' => ...]
+```
+
+In Laravel, resolve `Whisperr\Whisperr` (or use the facade) and call
+`catalog()` the same way. `new Whisperr\Catalog\CatalogClient($serverKey)` is
+the same client on its own.
+
+How it behaves:
+
+- **Sent right away, not buffered.** Each call blocks until Whisperr has
+  answered. `flush()` is not involved.
+- **Chunked.** Upserts go in batches of 500 items (and at most 2 MiB per
+  request), deletes in batches of 1000. A `rejected[]['index']` is the index in
+  the array you passed.
+- **Retried.** 429, 5xx and network errors are retried with backoff (default 5
+  retries), honoring `Retry-After`. When retries run out, the call throws
+  `Whisperr\Catalog\CatalogException` with `isRetryable()` true; for upsert
+  and delete, `getPartial()` holds what earlier chunks already did.
+- **Safe to repeat.** A retry sends the same body. Whisperr keeps the newest
+  write per item by `updated_at` (deletes by `deleted_at`), so a repeated or
+  late call never overwrites newer data. `delete()` uses one `deleted_at` for
+  the whole call (default: now). Always set `updated_at` from your own data,
+  not from the time of the call.
+- **Refusals throw.** A refused call throws `CatalogException` with
+  `getStatus()` and the server code in `getErrorCode()`, for example
+  `server_key_required`, `catalog_push_disabled` (the owner turned push off in
+  the dashboard) or `snapshot_not_open`. Redirects are never followed.
+- Only send the fields in the catalog item schema: no descriptions, no image
+  bytes. Prices are integer minor units; `Money::toMinorUnits($amount,
+  $currency)` converts using the ISO 4217 exponent and throws rather than round.
+
 ## Design
 
 - **Same wire contract as the other Whisperr SDKs.** Events post to
@@ -168,6 +252,8 @@ Every event carries `context.sdk_name` (`whisperr-php`) and
 | `disabled` | `false` | No-op client (useful in tests). |
 | `debug` | `false` | Verbose logging via `error_log`. |
 | `on_error` | — | `callable(WhisperrError): void` for observability. |
+| `catalog_max_retries` | `5` | Catalog call retries on 429, 5xx and network errors. |
+| `catalog_timeout` | `30.0` | Per-request timeout for catalog calls (seconds). |
 
 
 ## Runtime support

@@ -3,6 +3,31 @@
 Packagist reads versions from git tags (`vX.Y.Z`). `Whisperr::VERSION` must
 match the newest entry here; a test checks it.
 
+## 0.4.0 - 2026-10-23
+
+### Added
+
+- `$whisperr->catalog()` for catalog push (whisperr-go catalog v2):
+  `upsert($items)`, `delete($idsOrItems, $deletedAt = null)`,
+  `beginSnapshot()`, `completeSnapshot($snapshotId, $itemCount)`,
+  `heartbeat($itemCount)` and `status()`. Server key only: a `wpk_` key throws
+  `Whisperr\ConfigurationException` before any request. Calls block until
+  Whisperr answers; they are not buffered.
+- Upserts are chunked at 500 items and 2 MiB, deletes at 1000. Rejected items
+  come back with their index in the array you passed. A 413 splits the chunk.
+- 429, 5xx and network errors are retried with backoff, honoring
+  `Retry-After`. Retries resend the same body; `delete()` uses one
+  `deleted_at` per call. Refusals and exhausted retries throw
+  `Whisperr\Catalog\CatalogException` (`getStatus()`, `getErrorCode()`,
+  `isRetryable()`, `getPartial()`). Catalog requests never follow redirects.
+- `Whisperr\Catalog\CatalogClient` for a catalog client on its own. New
+  options `catalog_max_retries` and `catalog_timeout`.
+- `Whisperr\Money::toMinorUnits($amount, $currency)` and `currencyExponent()`
+  with the ISO 4217 exponents the server uses. They throw instead of rounding.
+- Tests run `tests/fixtures/catalog_push.json`, the catalog push conformance
+  cases (or `WHISPERR_CATALOG_SPEC_PATH`, once whisperr-spec publishes
+  `conformance/catalog_push.json`).
+
 ## 0.3.0 - 2026-10-12
 
 Whisperr spec contract v2 for server SDKs.
