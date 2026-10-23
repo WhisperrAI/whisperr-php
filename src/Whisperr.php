@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whisperr;
 
+use Whisperr\Catalog\CatalogClient;
 use Whisperr\Contracts\TransportInterface;
 use Whisperr\Contracts\PublisherTransportInterface;
 
@@ -21,8 +22,8 @@ use Whisperr\Contracts\PublisherTransportInterface;
  */
 class Whisperr
 {
-    /** SDK release. Sent as context.sdk_version on every event; matches the git tag (v0.3.0). */
-    public const VERSION = '0.3.0';
+    /** SDK release. Sent as context.sdk_version on every event; matches the git tag (v0.4.0). */
+    public const VERSION = '0.4.0';
     /** Sent as context.sdk_name on every event. */
     public const SDK_NAME = 'whisperr-php';
 
@@ -44,6 +45,10 @@ class Whisperr
     /** @var array<int,array<string,mixed>> */
     private array $queue = [];
 
+    /** @var array<string,mixed> */
+    private array $catalogOptions;
+    private ?CatalogClient $catalog = null;
+
     /** @param array<string,mixed> $options */
     public function __construct(array $options)
     {
@@ -62,6 +67,16 @@ class Whisperr
         $appVersion = trim((string) ($options['app_version'] ?? ''));
         if ($appVersion !== '') {
             $this->environmentContext['app_version'] = $appVersion;
+        }
+
+        $this->catalogOptions = [
+            'base_url' => $baseUrl,
+            'max_retries' => $options['catalog_max_retries'] ?? 5,
+            'timeout' => $options['catalog_timeout'] ?? 30.0,
+            'disabled' => $this->disabled,
+        ];
+        if (isset($options['catalog_http'])) {
+            $this->catalogOptions['http'] = $options['catalog_http'];
         }
 
         $timeout = (float) ($options['request_timeout'] ?? 10.0);
@@ -184,6 +199,16 @@ class Whisperr
             'occurred_at' => $occurredAt,
             'message_id' => $messageId,
         ]);
+    }
+
+    /**
+     * Catalog push: upsert and delete items, full-sync snapshots, heartbeat and
+     * status. Needs a server key (wrk_...); a publishable key (wpk_...) throws
+     * ConfigurationException. Calls are sent right away, not buffered.
+     */
+    public function catalog(): CatalogClient
+    {
+        return $this->catalog ??= new CatalogClient($this->apiKey, $this->catalogOptions);
     }
 
     /** Deliver everything currently buffered. Safe to call repeatedly. */
