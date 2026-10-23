@@ -9,8 +9,8 @@ namespace Whisperr\Catalog;
  *
  * getStatus() is the HTTP status (0 for a network error or timeout),
  * getErrorCode() the server's error code (server_key_required,
- * catalog_push_disabled, snapshot_not_open, ...) or network_error.
- * isRetryable() is true when retries ran out on a transient failure. For
+ * catalog_push_disabled, snapshot_not_open, snapshot_open, ...) or
+ * network_error. isRetryable() is true when retries ran out on a transient failure. For
  * upsert and delete, getPartial() holds what earlier chunks already did.
  */
 class CatalogException extends \RuntimeException

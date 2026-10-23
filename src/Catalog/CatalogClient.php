@@ -200,7 +200,8 @@ class CatalogClient
 
     /**
      * Tell Whisperr the catalog is still current. Send every 30 minutes with
-     * your live item count.
+     * your live item count. Refused with 409 snapshot_open while a full sync
+     * is open: complete the snapshot first.
      * @return array{refreshed:bool,reason?:string,stored_count?:int}
      */
     public function heartbeat(int $itemCount): array

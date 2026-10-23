@@ -189,7 +189,8 @@ foreach ($pages as $page) {
 }
 $whisperr->catalog()->completeSnapshot($snapshot['snapshot_id'], $totalCount);
 
-// Every 30 minutes (a scheduled command), so Whisperr knows the catalog is still current:
+// Every 30 minutes (a scheduled command), so Whisperr knows the catalog is still current.
+// Not while a full sync is open: complete the snapshot first (409 snapshot_open).
 $whisperr->catalog()->heartbeat($totalCount);
 
 // Health of the pushed catalog:
@@ -206,7 +207,12 @@ How it behaves:
   answered. `flush()` is not involved.
 - **Chunked.** Upserts go in batches of 500 items (and at most 2 MiB per
   request), deletes in batches of 1000. A `rejected[]['index']` is the index in
-  the array you passed.
+  the array you passed. If a request still comes back 413, the chunk is split
+  in halves and resent; a single item that cannot fit is listed in `rejected`
+  with the code `item_too_large`. That code comes from the SDK, never from the
+  server; every other `rejected` code is the server's (`invalid_item`,
+  `missing_field`, `invalid_url`, `url_host_not_allowed`, `invalid_image_url`,
+  `invalid_price`, `invalid_currency`, `invalid_kind`, `revision_conflict`).
 - **Retried.** 429, 5xx and network errors are retried with backoff (default 5
   retries), honoring `Retry-After`. When retries run out, the call throws
   `Whisperr\Catalog\CatalogException` with `isRetryable()` true; for upsert
@@ -219,7 +225,9 @@ How it behaves:
 - **Refusals throw.** A refused call throws `CatalogException` with
   `getStatus()` and the server code in `getErrorCode()`, for example
   `server_key_required`, `catalog_push_disabled` (the owner turned push off in
-  the dashboard) or `snapshot_not_open`. Redirects are never followed.
+  the dashboard), `snapshot_not_open`, or `snapshot_open` (a heartbeat while a
+  full sync is open). A 404 `route_not_implemented` means the push API is not
+  on for this deployment yet. Redirects are never followed.
 - Only send the fields in the catalog item schema: no descriptions, no image
   bytes. Prices are integer minor units; `Money::toMinorUnits($amount,
   $currency)` converts using the ISO 4217 exponent and throws rather than round.

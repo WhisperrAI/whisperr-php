@@ -12,16 +12,53 @@ use Whisperr\Money;
 
 /**
  * Catalog push conformance (tests/fixtures/catalog_push.json).
- * whisperr-spec conformance/catalog_push.json wins when WHISPERR_CATALOG_SPEC_PATH
- * points at it; until the spec publishes it, the bundled copy is the contract.
- * PHP items and results use the wire names, so fixture inputs are passed as is.
+ * tests/fixtures/catalog_push.json is a byte-identical copy of whisperr-spec
+ * conformance/catalog_push.json. Point WHISPERR_CATALOG_SPEC_PATH at a spec
+ * checkout's file to run that copy instead and to check the bundled one has
+ * not drifted from it. PHP items and results use the wire names, so fixture
+ * inputs are passed as is.
  */
 final class CatalogConformanceTest extends TestCase
 {
+    private const BUNDLED = __DIR__ . '/fixtures/catalog_push.json';
+
     private static function spec(): array
     {
-        $path = getenv('WHISPERR_CATALOG_SPEC_PATH') ?: __DIR__ . '/fixtures/catalog_push.json';
+        $path = getenv('WHISPERR_CATALOG_SPEC_PATH') ?: self::BUNDLED;
         return json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /** Client-side reject codes carry an SDK-defined message: check it is set, not its text. */
+    private function expectedResult(array $case, $result): array
+    {
+        $want = $case['result'];
+        $client = self::spec()['reject_codes']['client'];
+        foreach ($want['rejected'] ?? [] as $i => $r) {
+            if (in_array($r['code'], $client, true)) {
+                $message = $result['rejected'][$i]['message'] ?? null;
+                $this->assertIsString($message);
+                $this->assertNotSame('', trim($message));
+                $want['rejected'][$i]['message'] = $message;
+            }
+        }
+        return $want;
+    }
+
+    public function testBundledFixtureIsByteIdenticalToTheSpecCopy(): void
+    {
+        $spec = getenv('WHISPERR_CATALOG_SPEC_PATH');
+        if (!$spec) {
+            $this->markTestSkipped('WHISPERR_CATALOG_SPEC_PATH is not set');
+        }
+        $this->assertSame(file_get_contents($spec), file_get_contents(self::BUNDLED));
+    }
+
+    public function testTheOnlySdkWrittenRejectCodeIsListedAsClientSide(): void
+    {
+        // item_too_large is the only code the SDK adds; the server never sends it.
+        $codes = self::spec()['reject_codes'];
+        $this->assertSame(['item_too_large'], $codes['client']);
+        $this->assertNotContains('item_too_large', $codes['server']);
     }
 
     public static function cases(): array
@@ -115,7 +152,7 @@ final class CatalogConformanceTest extends TestCase
         if ($error) {
             throw $error;
         }
-        $this->assertEquals($case['result'], $result);
+        $this->assertEquals($this->expectedResult($case, $result), $result);
     }
 
     /** @dataProvider minorUnits */
